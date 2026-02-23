@@ -2,143 +2,280 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>聊天记录查看器 - iPad 兼容</title>
+<title>ChatGPT JSON 对话阅读器</title>
 <style>
 body {
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-    background: #f5f5f7;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    background: #fdfdfd;
     margin: 0;
-    padding: 20px;
+    padding: 0;
+    color: #333;
+}
+header {
+    padding: 15px;
+    background: #f0f4f8;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
 }
 #fileButton {
-    display: inline-block;
-    padding: 20px 30px;
+    display: block;
+    padding: 12px;
     border: 2px dashed #007aff;
-    border-radius: 12px;
-    background: white;
+    border-radius: 10px;
+    background: #fff;
     color: #007aff;
     font-weight: bold;
-    cursor: pointer;
     text-align: center;
-    margin-bottom: 20px;
+    cursor: pointer;
+}
+#fileButton.dragover {
+    background: #e6f0ff;
+}
+#fileInput {
+    display: none;
+}
+#conversationSelect, #searchInput, #toggleThoughts, #expandCollapseThoughts {
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+}
+#controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+#chatContainer {
+    padding: 15px;
 }
 .message {
-    margin: 10px 0;
     padding: 12px 16px;
-    border-radius: 14px;
-    max-width: 70%;
+    border-radius: 16px;
+    margin: 8px 0;
+    max-width: 80%;
     white-space: pre-wrap;
+    position: relative;
 }
-.user {
-    background: #007aff;
-    color: white;
-    margin-left: auto;
-}
-.assistant {
-    background: #e5e5ea;
-    color: black;
-    margin-right: auto;
-}
-.time {
+.message.user { background: #d0f0ff; align-self: flex-end; margin-left: auto; }
+.message.assistant { background: #e5e5ea; align-self: flex-start; margin-right: auto; }
+.message.system { background: #fef3d0; align-self: flex-start; margin-right: auto; }
+.message.tool { background: #f0e5ff; align-self: flex-start; margin-right: auto; }
+.roleLabel {
     font-size: 12px;
+    font-weight: bold;
+    margin-bottom: 4px;
+    display: block;
+}
+.timeLabel {
+    font-size: 11px;
     opacity: 0.6;
     margin-top: 4px;
 }
-#error {
-    color: red;
-    margin-top: 10px;
+.thoughtsContainer {
+    background: #f0f0f0;
+    border-left: 3px solid #999;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    display: none;
+    font-family: monospace;
+    white-space: pre-wrap;
+}
+.thoughtsToggle {
+    font-size: 12px;
+    color: #007aff;
+    cursor: pointer;
+    margin-bottom: 4px;
+    display: inline-block;
+}
+.highlight {
+    background-color: #fff3b0;
+}
+@media (max-width:600px){
+    .message { max-width: 95%; }
+    #controls { flex-direction: column; }
 }
 </style>
 </head>
 <body>
-
-<h2>聊天记录查看器</h2>
-<div id="fileButton">点击选择 JSON 文件</div>
-<input type="file" id="fileInput" multiple accept=".json" style="display:none">
-
-<div id="error"></div>
+<header>
+    <div id="fileButton">点击或拖拽导入 JSON 文件</div>
+    <input type="file" id="fileInput" multiple accept=".json">
+    <div id="controls">
+        <select id="conversationSelect"></select>
+        <input type="text" id="searchInput" placeholder="搜索消息关键字">
+        <button id="toggleThoughts">切换思考链显示/隐藏</button>
+        <button id="expandCollapseThoughts">全部折叠/展开思考链</button>
+    </div>
+</header>
 <div id="chatContainer"></div>
 
 <script>
 const fileButton = document.getElementById("fileButton");
 const fileInput = document.getElementById("fileInput");
+const conversationSelect = document.getElementById("conversationSelect");
 const chatContainer = document.getElementById("chatContainer");
-const errorDiv = document.getElementById("error");
+const searchInput = document.getElementById("searchInput");
+const toggleThoughtsBtn = document.getElementById("toggleThoughts");
+const expandCollapseBtn = document.getElementById("expandCollapseThoughts");
 
-fileButton.onclick = () => fileInput.click();
+let allConversations = [];
+let currentMessages = [];
+let thoughtsVisible = false;
 
-fileInput.addEventListener("change", async e => {
-    const files = e.target.files;
-    if (!files.length) return;
+fileButton.addEventListener("click", () => fileInput.click());
+fileButton.addEventListener("dragover", e=>{e.preventDefault(); fileButton.classList.add("dragover");});
+fileButton.addEventListener("dragleave", e=>{fileButton.classList.remove("dragover");});
+fileButton.addEventListener("drop", e=>{
+    e.preventDefault();
+    fileButton.classList.remove("dragover");
+    handleFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener("change", e => handleFiles(e.target.files));
 
-    chatContainer.innerHTML = "";
-    errorDiv.innerText = "";
-
-    let allMessages = [];
-
-    for (let file of files) {
-        try {
-            const text = await file.text();
-            const json = JSON.parse(text);
-
-            // 兼容多种结构
-            if (Array.isArray(json)) {
-                allMessages.push(...json);
-            } else if (json.messages) {
-                allMessages.push(...json.messages);
-            } else if (json.conversation) {
-                allMessages.push(...json.conversation);
-            } else {
-                allMessages.push(json);
-            }
-        } catch(err) {
-            errorDiv.innerText += `文件 "${file.name}" 解析失败: ${err.message}\n`;
-        }
-    }
-
-    if (!allMessages.length) {
-        errorDiv.innerText += "没有有效消息显示，请检查 JSON 格式。";
-        return;
-    }
-
-    // 按时间排序
-    allMessages.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
-
-    // 渲染消息
-    allMessages.forEach(msg => {
-        let role = "assistant";
-        let content = "";
-
-        if (msg.author && msg.author.role) role = msg.author.role;
-
-        if (msg.content) {
-            if (typeof msg.content === "string") {
-                content = msg.content;
-            } else if (msg.content.parts && Array.isArray(msg.content.parts)) {
-                content = msg.content.parts.join("\n");
-            }
-        } else if (typeof msg === "string") {
-            content = msg;
-        }
-
-        if (!content) return;
-
-        const div = document.createElement("div");
-        div.className = "message " + role;
-        div.innerText = content;
-
-        const timeDiv = document.createElement("div");
-        timeDiv.className = "time";
-        if (msg.created_at) {
-            const date = new Date(msg.created_at * 1000);
-            timeDiv.innerText = date.toLocaleString();
-        }
-
-        div.appendChild(timeDiv);
-        chatContainer.appendChild(div);
+function handleFiles(files){
+    const readers = Array.from(files).map(f => f.text().then(txt => JSON.parse(txt)).catch(err=>console.error(f.name,err)));
+    Promise.all(readers).then(jsons => {
+        allConversations = [];
+        jsons.forEach(js=>{
+            if(js.conversations) allConversations.push(...js.conversations);
+            else allConversations.push(js);
+        });
+        populateConversationSelect();
     });
+}
+
+function populateConversationSelect(){
+    conversationSelect.innerHTML = "";
+    allConversations.sort((a,b)=> (b.created_at||0) - (a.created_at||0));
+    allConversations.forEach((conv,i)=>{
+        let opt = document.createElement("option");
+        let title = conv.title || `对话 ${i+1}`;
+        let date = conv.created_at ? new Date(conv.created_at*1000).toLocaleString() : "";
+        opt.value = i;
+        opt.textContent = `${title} ${date}`;
+        conversationSelect.appendChild(opt);
+    });
+    if(allConversations.length>0){
+        loadConversation(0);
+    }
+}
+
+conversationSelect.addEventListener("change", e=> loadConversation(parseInt(e.target.value)));
+
+function getActiveBranch(conversation){
+    // 使用 current_node 回溯
+    if(conversation.current_node){
+        let node = conversation.current_node;
+        const branch = [];
+        while(node){
+            branch.unshift(node);
+            node = node.parent;
+        }
+        return branch;
+    }
+    // fallback: 每个节点取最后一个 child 遍历
+    function traverse(node){
+        const path = [node];
+        while(node.children && node.children.length) node = node.children[node.children.length-1], path.push(node);
+        return path;
+    }
+    if(conversation.mapping){
+        const roots = Object.values(conversation.mapping).filter(n=>!n.parent);
+        return traverse(roots[0]);
+    }
+    return [];
+}
+
+function loadConversation(index){
+    const conv = allConversations[index];
+    currentMessages = getActiveBranch(conv);
+    renderMessages();
+}
+
+function extractThoughts(msg){
+    let thoughts = [];
+    if(msg.content && Array.isArray(msg.content.parts)){
+        msg.content.parts.forEach(p=>{
+            if(typeof p==="object" && p.content_type==="thoughts") thoughts.push(p.text||"");
+        });
+    }
+    if(msg.metadata){
+        if(msg.metadata.thinking) thoughts.push(msg.metadata.thinking);
+        if(msg.metadata.reasoning) thoughts.push(msg.metadata.reasoning);
+        if(msg.metadata._thinking_content) thoughts.push(msg.metadata._thinking_content);
+        if(msg.metadata.reasoning && msg.metadata.reasoning._content) thoughts.push(msg.metadata.reasoning._content);
+    }
+    return thoughts.filter(Boolean).join("\n");
+}
+
+function renderMessages(){
+    const keyword = searchInput.value.trim().toLowerCase();
+    chatContainer.innerHTML = "";
+    currentMessages.forEach(msg=>{
+        const role = msg.author?.role || msg.role || "assistant";
+        let content = "";
+        if(msg.content){
+            if(typeof msg.content==="string") content = msg.content;
+            else if(Array.isArray(msg.content.parts)) content = msg.content.parts.map(p=>typeof p==="string"?p:p.text||"").join("\n");
+        } else if(typeof msg==="string") content = msg;
+
+        if(!content) return;
+
+        // 搜索高亮
+        let htmlContent = content;
+        if(keyword){
+            const re = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            htmlContent = htmlContent.replace(re, match=>`<span class="highlight">${match}</span>`);
+        }
+
+        const msgDiv = document.createElement("div");
+        msgDiv.className = `message ${role}`;
+        const label = document.createElement("span");
+        label.className="roleLabel";
+        label.innerText = role;
+        msgDiv.appendChild(label);
+
+        const thoughtsText = extractThoughts(msg);
+        if(thoughtsText){
+            const tDiv = document.createElement("div");
+            tDiv.className="thoughtsContainer";
+            tDiv.innerText = thoughtsText;
+            if(thoughtsVisible) tDiv.style.display="block";
+
+            const toggle = document.createElement("span");
+            toggle.className="thoughtsToggle";
+            toggle.innerText="思考过程";
+            toggle.onclick = ()=>{ tDiv.style.display = tDiv.style.display==="none"?"block":"none"; };
+            chatContainer.appendChild(toggle);
+            chatContainer.appendChild(tDiv);
+        }
+
+        const contentDiv = document.createElement("div");
+        contentDiv.innerHTML = htmlContent;
+        msgDiv.appendChild(contentDiv);
+
+        const timeSpan = document.createElement("span");
+        timeSpan.className="timeLabel";
+        if(msg.created_at) timeSpan.innerText = new Date(msg.created_at*1000).toLocaleString();
+        msgDiv.appendChild(timeSpan);
+
+        chatContainer.appendChild(msgDiv);
+    });
+}
+
+searchInput.addEventListener("input", renderMessages);
+toggleThoughtsBtn.addEventListener("click", ()=>{
+    thoughtsVisible = !thoughtsVisible;
+    renderMessages();
+});
+expandCollapseBtn.addEventListener("click", ()=>{
+    const allT = chatContainer.querySelectorAll(".thoughtsContainer");
+    const anyHidden = Array.from(allT).some(t=>t.style.display==="none");
+    allT.forEach(t=>t.style.display = anyHidden?"block":"none");
 });
 </script>
-
 </body>
 </html>
