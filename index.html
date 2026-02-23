@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Chat JSON Viewer</title>
+<style>
+body {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #f5f5f7;
+    margin: 0;
+    padding: 20px;
+}
+#dropZone {
+    border: 2px dashed #aaa;
+    padding: 40px;
+    text-align: center;
+    background: white;
+    margin-bottom: 20px;
+    cursor: pointer;
+}
+.message {
+    margin: 10px 0;
+    padding: 12px 16px;
+    border-radius: 14px;
+    max-width: 70%;
+    white-space: pre-wrap;
+}
+.user {
+    background: #007aff;
+    color: white;
+    margin-left: auto;
+}
+.assistant {
+    background: #e5e5ea;
+    color: black;
+    margin-right: auto;
+}
+.time {
+    font-size: 12px;
+    opacity: 0.6;
+    margin-top: 4px;
+}
+</style>
+</head>
+<body>
+
+<h2>聊天记录查看器</h2>
+<div id="dropZone">拖拽多个 JSON 文件到这里，或点击选择</div>
+<input type="file" id="fileInput" multiple style="display:none">
+
+<div id="chatContainer"></div>
+
+<script>
+const dropZone = document.getElementById("dropZone");
+const fileInput = document.getElementById("fileInput");
+const chatContainer = document.getElementById("chatContainer");
+
+dropZone.onclick = () => fileInput.click();
+
+dropZone.addEventListener("dragover", e => {
+    e.preventDefault();
+    dropZone.style.background = "#f0f0f0";
+});
+
+dropZone.addEventListener("dragleave", () => {
+    dropZone.style.background = "white";
+});
+
+dropZone.addEventListener("drop", e => {
+    e.preventDefault();
+    dropZone.style.background = "white";
+    handleFiles(e.dataTransfer.files);
+});
+
+fileInput.addEventListener("change", e => {
+    handleFiles(e.target.files);
+});
+
+async function handleFiles(files) {
+    let allMessages = [];
+
+    for (let file of files) {
+        let text = await file.text();
+        let json = JSON.parse(text);
+
+        // 兼容不同结构
+        if (Array.isArray(json)) {
+            allMessages.push(...json);
+        } else if (json.messages) {
+            allMessages.push(...json.messages);
+        } else if (json.conversation) {
+            allMessages.push(...json.conversation);
+        }
+    }
+
+    // 按时间排序
+    allMessages.sort((a, b) => {
+        return (a.created_at || 0) - (b.created_at || 0);
+    });
+
+    renderMessages(allMessages);
+}
+
+function renderMessages(messages) {
+    chatContainer.innerHTML = "";
+
+    messages.forEach(msg => {
+        if (!msg.author || !msg.author.role) return;
+
+        const div = document.createElement("div");
+        div.className = "message " + msg.author.role;
+
+        let content = "";
+
+        if (msg.content && msg.content.parts) {
+            content = msg.content.parts.join("\n");
+        } else if (msg.content && typeof msg.content === "string") {
+            content = msg.content;
+        }
+
+        div.innerText = content;
+
+        const timeDiv = document.createElement("div");
+        timeDiv.className = "time";
+
+        if (msg.created_at) {
+            const date = new Date(msg.created_at * 1000);
+            timeDiv.innerText = date.toLocaleString();
+        }
+
+        div.appendChild(timeDiv);
+        chatContainer.appendChild(div);
+    });
+}
+</script>
+
+</body>
+</html>
