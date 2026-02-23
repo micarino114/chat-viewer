@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>Chat JSON Viewer</title>
+<title>聊天记录查看器 - iPad 兼容</title>
 <style>
 body {
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
@@ -10,13 +10,17 @@ body {
     margin: 0;
     padding: 20px;
 }
-#dropZone {
-    border: 2px dashed #aaa;
-    padding: 40px;
-    text-align: center;
+#fileButton {
+    display: inline-block;
+    padding: 20px 30px;
+    border: 2px dashed #007aff;
+    border-radius: 12px;
     background: white;
-    margin-bottom: 20px;
+    color: #007aff;
+    font-weight: bold;
     cursor: pointer;
+    text-align: center;
+    margin-bottom: 20px;
 }
 .message {
     margin: 10px 0;
@@ -40,89 +44,91 @@ body {
     opacity: 0.6;
     margin-top: 4px;
 }
+#error {
+    color: red;
+    margin-top: 10px;
+}
 </style>
 </head>
 <body>
 
 <h2>聊天记录查看器</h2>
-<div id="dropZone">拖拽多个 JSON 文件到这里，或点击选择</div>
-<input type="file" id="fileInput" multiple style="display:none">
+<div id="fileButton">点击选择 JSON 文件</div>
+<input type="file" id="fileInput" multiple accept=".json" style="display:none">
 
+<div id="error"></div>
 <div id="chatContainer"></div>
 
 <script>
-const dropZone = document.getElementById("dropZone");
+const fileButton = document.getElementById("fileButton");
 const fileInput = document.getElementById("fileInput");
 const chatContainer = document.getElementById("chatContainer");
+const errorDiv = document.getElementById("error");
 
-dropZone.onclick = () => fileInput.click();
+fileButton.onclick = () => fileInput.click();
 
-dropZone.addEventListener("dragover", e => {
-    e.preventDefault();
-    dropZone.style.background = "#f0f0f0";
-});
+fileInput.addEventListener("change", async e => {
+    const files = e.target.files;
+    if (!files.length) return;
 
-dropZone.addEventListener("dragleave", () => {
-    dropZone.style.background = "white";
-});
+    chatContainer.innerHTML = "";
+    errorDiv.innerText = "";
 
-dropZone.addEventListener("drop", e => {
-    e.preventDefault();
-    dropZone.style.background = "white";
-    handleFiles(e.dataTransfer.files);
-});
-
-fileInput.addEventListener("change", e => {
-    handleFiles(e.target.files);
-});
-
-async function handleFiles(files) {
     let allMessages = [];
 
     for (let file of files) {
-        let text = await file.text();
-        let json = JSON.parse(text);
+        try {
+            const text = await file.text();
+            const json = JSON.parse(text);
 
-        // 兼容不同结构
-        if (Array.isArray(json)) {
-            allMessages.push(...json);
-        } else if (json.messages) {
-            allMessages.push(...json.messages);
-        } else if (json.conversation) {
-            allMessages.push(...json.conversation);
+            // 兼容多种结构
+            if (Array.isArray(json)) {
+                allMessages.push(...json);
+            } else if (json.messages) {
+                allMessages.push(...json.messages);
+            } else if (json.conversation) {
+                allMessages.push(...json.conversation);
+            } else {
+                allMessages.push(json);
+            }
+        } catch(err) {
+            errorDiv.innerText += `文件 "${file.name}" 解析失败: ${err.message}\n`;
         }
     }
 
+    if (!allMessages.length) {
+        errorDiv.innerText += "没有有效消息显示，请检查 JSON 格式。";
+        return;
+    }
+
     // 按时间排序
-    allMessages.sort((a, b) => {
-        return (a.created_at || 0) - (b.created_at || 0);
-    });
+    allMessages.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
 
-    renderMessages(allMessages);
-}
-
-function renderMessages(messages) {
-    chatContainer.innerHTML = "";
-
-    messages.forEach(msg => {
-        if (!msg.author || !msg.author.role) return;
-
-        const div = document.createElement("div");
-        div.className = "message " + msg.author.role;
-
+    // 渲染消息
+    allMessages.forEach(msg => {
+        let role = "assistant";
         let content = "";
 
-        if (msg.content && msg.content.parts) {
-            content = msg.content.parts.join("\n");
-        } else if (msg.content && typeof msg.content === "string") {
-            content = msg.content;
+        if (msg.author && msg.author.role) role = msg.author.role;
+
+        if (msg.content) {
+            if (typeof msg.content === "string") {
+                content = msg.content;
+            } else if (msg.content.parts && Array.isArray(msg.content.parts)) {
+                content = msg.content.parts.join("\n");
+            }
+        } else if (typeof msg === "string") {
+            content = msg;
         }
 
+        if (!content) return;
+
+        const div = document.createElement("div");
+        div.className = "message " + role;
         div.innerText = content;
 
         const timeDiv = document.createElement("div");
         timeDiv.className = "time";
-
         if (msg.created_at) {
             const date = new Date(msg.created_at * 1000);
             timeDiv.innerText = date.toLocaleString();
@@ -131,7 +137,7 @@ function renderMessages(messages) {
         div.appendChild(timeDiv);
         chatContainer.appendChild(div);
     });
-}
+});
 </script>
 
 </body>
